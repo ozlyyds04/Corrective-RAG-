@@ -1,0 +1,16 @@
+# 密钥与环境配置
+.env
+
+# Python / 虚拟环境
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+.pytest_tmp/
+*.log
+
+# 评估报告输出
+eval/reports/
+
+# 知识库注册表
+knowledge_bases.json
