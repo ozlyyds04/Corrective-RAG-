@@ -690,7 +690,12 @@ class CorrectiveRAG:
             ranked = sorted(
                 zip(scores, documents), key=lambda item: -float(item[0])
             )
-            return [doc for _, doc in ranked]
+            result: List[Document] = []
+            for score, doc in ranked:
+                # 把重排分数挂到文档元数据上，供检索可视化展示
+                doc.metadata["rerank_score"] = float(score)
+                result.append(doc)
+            return result
         except Exception:
             return documents
 
@@ -817,3 +822,84 @@ class CorrectiveRAG:
         documents = self._retrieve(question)
         generation = self._generate(question, documents)
         return {"documents": documents, "question": question, "generation": generation}
+
+    # ---------- 流式生成与证据解析（供 FastAPI 界面复用） ----------
+
+    def _generate_stream(self, question: str, documents: List[Document]) -> Iterator[str]:
+        """逐 token 流式生成最终回答（与 _generate 使用相同的提示词）。"""
+        prompt = PromptTemplate(
+            template="""You are an assistant that answers questions strictly based on the provided context.
+            Rules:
+            - Answer ONLY using the information in the context.
+            - Do NOT add general knowledge, speculation, examples, or content from outside the context.
+            - If the context does not contain enough information to answer the question,
+              reply with "根据现有资料无法回答该问题" and do not guess.
+            Context: {context}
+            Question: {question}
+            Answer:""",
+            input_variables=["context", "question"],
+        )
+        llm = self._llm()
+        context = "\n\n".join(doc.page_content for doc in documents)
+        rag_chain = (
+            {"context": lambda x: context, "question": lambda x: question}
+            | prompt
+            | llm
+            | StrOutputParser()
+        )
+        for chunk in rag_chain.stream({}):
+            yield chunk
+
+    def run_evidence(
+        self, question: str, progress_callback=None
+    ) -> tuple[List[Document], Dict[str, Dict[str, Any]]]:
+        """执行纠错检索链（检索 → 评分 → 必要时改写查询 + 网络搜索），但不生成回答。
+
+        返回（用于生成最终回答的文档列表，各步骤状态）。生成交给 _generate_stream 流式完成，
+        以便前端展示检索到的片段与重排分数。
+        """
+        steps: Dict[str, Dict[str, Any]] = {}
+        documents = self._retrieve(question)
+        if progress_callback is not None:
+            progress_callback("retrieve", 0)
+        steps["retrieve"] = {"documents": documents, "question": question}
+
+        self._status("正在评估检索结果相关性...")
+        filtered, search = self._grade_documents(question, documents)
+        if progress_callback is not None:
+            progress_callback("grade_documents", 1)
+        steps["grade_documents"] = {
+            "documents": filtered,
+            "run_web_search": search,
+            "question": question,
+        }
+
+        if search == "Yes":
+            self._status("检索不足，正在改写查询并搜索网络...")
+            better_question = self._transform_query(question)
+            if progress_callback is not None:
+                progress_callback("transform_query", 2)
+            steps["transform_query"] = {
+                "question": better_question,
+                "documents": filtered,
+            }
+            web_documents = self._tavily_search(better_question)
+            final_documents = filtered
+            if web_documents:
+                relevant_web, _ = self._grade_documents(better_question, web_documents)
+                final_documents = filtered + relevant_web
+            if progress_callback is not None:
+                progress_callback("web_search", 3)
+            steps["web_search"] = {
+                "documents": final_documents,
+                "question": better_question,
+            }
+        else:
+            if progress_callback is not None:
+                progress_callback("generate", 4)
+            final_documents = filtered
+            steps["generate"] = {
+                "documents": final_documents,
+                "question": question,
+            }
+        return final_documents, steps

@@ -1,8 +1,15 @@
 """pytest 公共夹具。"""
 
+import os
+import tempfile
 import zipfile
 
 import pytest
+
+# 在导入 api 模块前固定知识库注册表路径，避免污染仓库根目录的 knowledge_bases.json
+os.environ["KB_REGISTRY_PATH"] = os.path.join(tempfile.gettempdir(), "kb_test.json")
+if os.path.exists(os.environ["KB_REGISTRY_PATH"]):
+    os.remove(os.environ["KB_REGISTRY_PATH"])
 
 
 def make_minimal_docx(path: str, text: str = "Docx content test") -> None:
