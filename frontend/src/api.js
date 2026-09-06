@@ -1,7 +1,23 @@
 const BASE = ''
+const TOKEN_KEY = 'rag_api_token'
+
+function getToken() {
+  try {
+    return localStorage.getItem(TOKEN_KEY) || ''
+  } catch {
+    return ''
+  }
+}
+
+function headers(extra = {}) {
+  const h = { ...extra }
+  const t = getToken()
+  if (t) h['X-API-Token'] = t
+  return h
+}
 
 async function request(path, options = {}) {
-  const res = await fetch(`${BASE}${path}`, options)
+  const res = await fetch(`${BASE}${path}`, { ...options, headers: headers(options.headers) })
   if (!res.ok) {
     let detail = res.statusText
     try {
@@ -41,6 +57,10 @@ export const api = {
       body: JSON.stringify({ dir, kb_name: kbName }),
     }),
   stopWatch: () => request('/api/watch/stop', { method: 'POST' }),
+  listSessions: () => request('/api/sessions'),
+  sessionMessages: (sid) => request(`/api/sessions/${encodeURIComponent(sid)}/messages`),
+  deleteSession: (sid) =>
+    request(`/api/sessions/${encodeURIComponent(sid)}`, { method: 'DELETE' }),
 }
 
 // 读取 fetch 流式响应的 SSE 帧，按 event 名分发到 handlers
@@ -100,7 +120,7 @@ export async function readSSE(res, handlers = {}) {
 export async function queryStream(payload, handlers = {}) {
   const res = await fetch(`${BASE}/api/query/stream`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: headers({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(payload),
   })
   await readSSE(res, handlers)
@@ -109,7 +129,7 @@ export async function queryStream(payload, handlers = {}) {
 export async function ingestStream(payload, handlers = {}) {
   const res = await fetch(`${BASE}/api/ingest/stream`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: headers({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(payload),
   })
   await readSSE(res, handlers)

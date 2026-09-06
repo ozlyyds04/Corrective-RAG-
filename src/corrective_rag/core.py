@@ -8,6 +8,8 @@ from __future__ import annotations
 import json
 import os
 import re
+import threading
+import time
 import uuid
 import zlib
 from typing import Any, Dict, Iterator, List, Optional, TypedDict
@@ -57,6 +59,33 @@ CHUNK_OVERLAP = 100
 TOP_K = 5
 SPARSE_FIELD = "sparse"
 DENSE_FIELD = "dense"
+# 检索器构建失败的冷却时间（秒）：期间不再为同一知识库重复新建 Qdrant 连接
+RETRIEVER_MISS_COOLDOWN = 30.0
+
+
+def _count_tokens(text: str) -> int:
+    """纯本地 token 估算：中文按字符计，其他按 /4，不依赖网络。
+    仅用于给 MAX_CONTEXT_TOKENS 做粗略预算，不追求精确。
+    """
+    if not text:
+        return 0
+    cjk = sum(1 for ch in text if "\u4e00" <= ch <= "\u9fff")
+    other = len(text) - cjk
+    return max(1, cjk + other // 4)
+
+
+def _truncate_to_tokens(text: str, budget: int) -> str:
+    """把文本截到不超过 budget 个 token（二分搜索，保留开头）。"""
+    if _count_tokens(text) <= budget:
+        return text
+    lo, hi = 0, len(text)
+    while lo < hi:
+        mid = (lo + hi + 1) // 2
+        if _count_tokens(text[:mid]) <= budget:
+            lo = mid
+        else:
+            hi = mid - 1
+    return text[:lo]
 
 
 def tokenize_for_sparse(text: str) -> List[str]:
@@ -117,6 +146,23 @@ def _upsert_with_retry(client, collection_name: str, points) -> None:
 def _delete_points_with_retry(client, collection_name: str, kb_name: str) -> None:
     query_filter = Filter(
         must=[FieldCondition(key="kb", match=MatchValue(value=kb_name))]
+    )
+    client.delete(
+        collection_name=collection_name,
+        points_selector=FilterSelector(filter=query_filter),
+    )
+
+
+@_RETRY_DECORATOR
+def _delete_source_points_with_retry(
+    client, collection_name: str, kb_name: str, source: str
+) -> None:
+    """删除某知识库内指定来源的全部片段，用于增量替换（避免重复与陈旧数据）。"""
+    query_filter = Filter(
+        must=[
+            FieldCondition(key="kb", match=MatchValue(value=kb_name)),
+            FieldCondition(key="metadata.source", match=MatchValue(value=source)),
+        ]
     )
     client.delete(
         collection_name=collection_name,
@@ -330,6 +376,7 @@ class CorrectiveRAG:
         embedding_base_url: str = "",
         embedding_dim: Optional[int] = None,
         retriever=None,
+        max_context_tokens: Optional[int] = None,
     ) -> None:
         self.openai_api_key = openai_api_key
         self.tavily_api_key = tavily_api_key
@@ -343,6 +390,16 @@ class CorrectiveRAG:
         # 向量维度：None 表示入库时自动探测
         self.embedding_dim = embedding_dim
         self.retriever = retriever
+        # 生成上下文最大 token 预算（超过则按重排分数择优 + 截断）
+        self.max_context_tokens = max_context_tokens or int(
+            os.getenv("MAX_CONTEXT_TOKENS", "2600")
+        )
+        # 按知识库缓存的检索器，支持重启后从已有 Qdrant 数据懒加载
+        self._retrievers: Dict[str, "QdrantRetriever"] = {}
+        # 构建失败的冷却记录（kb_name -> 失败时刻），避免 Qdrant 不可用时反复新建连接
+        self._retriever_misses: Dict[str, float] = {}
+        # 检索器缓存并发保护（prepare_retriever / ingest 会改 self.retriever / _retrievers）
+        self._retriever_lock = threading.Lock()
         # 可选的状态回调，供 UI 展示进度（例如 Streamlit 的占位提示）
         self.status_callback: Optional[callable] = None
 
@@ -441,12 +498,22 @@ class CorrectiveRAG:
             )
         except Exception:
             pass
+        # 增量替换按来源删除片段，同样需要索引
+        try:
+            client.create_payload_index(
+                collection_name=collection_name,
+                field_name="metadata.source",
+                field_schema="keyword",
+            )
+        except Exception:
+            pass
 
     def ingest(
         self,
         docs: List[Document],
         collection_name: str = DEFAULT_COLLECTION,
         kb_name: str = "默认",
+        clear_existing: bool = True,
     ) -> None:
         """切块、写入 Qdrant，并设置检索器。"""
         if not docs:
@@ -463,7 +530,8 @@ class CorrectiveRAG:
         embeddings = self._embeddings()
         self._ensure_collection(client, collection_name, embeddings)
         # 只清理当前知识库的数据，保留其他知识库
-        _delete_points_with_retry(client, collection_name, kb_name)
+        if clear_existing:
+            _delete_points_with_retry(client, collection_name, kb_name)
 
         # 直接写入 Qdrant（langchain_qdrant 已弃用，且与新版 qdrant-client 不兼容）
         # DashScope 单次请求最多 20 条，这里显式分批，避免依赖 langchain 内部实现
@@ -495,9 +563,12 @@ class CorrectiveRAG:
             for chunk, vector in zip(all_splits, vectors)
         ]
         _upsert_with_retry(client, collection_name, points)
-        self.retriever = QdrantRetriever(
+        retriever = QdrantRetriever(
             client, collection_name, embeddings, kb_name=kb_name, reranker=self._rerank
         )
+        with self._retriever_lock:
+            self.retriever = retriever
+            self._retrievers[kb_name] = retriever
 
     def ingest_stream(
         self,
@@ -506,6 +577,7 @@ class CorrectiveRAG:
         collection_name: str = DEFAULT_COLLECTION,
         progress_callback=None,
         batch_size: int = 20,
+        clear_existing: bool = True,
     ) -> tuple[int, List[tuple[str, str]]]:
         """边加载边分批入库（每批最多 batch_size 条向量化后立即写入）。
 
@@ -524,8 +596,9 @@ class CorrectiveRAG:
         embeddings = self._embeddings()
         self._ensure_collection(client, collection_name, embeddings)
 
-        # 只清理当前知识库的数据，保留其他知识库
-        _delete_points_with_retry(client, collection_name, kb_name)
+        # 全量模式延迟到首个批次真正写入前才清理旧数据：
+        # 若所有来源都加载失败，原有数据不会被清空
+        cleared = False
 
         text_splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
             chunk_size=CHUNK_SIZE, chunk_overlap=CHUNK_OVERLAP
@@ -537,9 +610,13 @@ class CorrectiveRAG:
         chunk_count = 0
 
         def flush() -> None:
-            nonlocal chunk_count
+            nonlocal chunk_count, cleared
             if not chunk_batch:
                 return
+            if clear_existing and not cleared:
+                # 只清理当前知识库的数据，保留其他知识库
+                _delete_points_with_retry(client, collection_name, kb_name)
+                cleared = True
             texts = [c.page_content for c in chunk_batch]
             vectors = _embed_documents_with_retry(embeddings, texts)
             points = [
@@ -564,6 +641,12 @@ class CorrectiveRAG:
         for src in expanded:
             try:
                 docs = load_documents(src, is_url=src.startswith(("http://", "https://")))
+                if not clear_existing:
+                    # 增量模式：加载成功后先替换该来源的旧片段，
+                    # 文件修改后不留陈旧内容，重复入库也不会产生重复片段
+                    _delete_source_points_with_retry(
+                        client, collection_name, kb_name, src
+                    )
                 for doc in docs:
                     chunk_batch.extend(text_splitter.split_documents([doc]))
                     if len(chunk_batch) >= batch_size:
@@ -579,9 +662,12 @@ class CorrectiveRAG:
         if progress_callback is not None:
             progress_callback(total, total, chunk_count)
 
-        self.retriever = QdrantRetriever(
+        retriever = QdrantRetriever(
             client, collection_name, embeddings, kb_name=kb_name, reranker=self._rerank
         )
+        with self._retriever_lock:
+            self.retriever = retriever
+            self._retrievers[kb_name] = retriever
         return chunk_count, errors
 
     def delete_knowledge_base(
@@ -594,31 +680,106 @@ class CorrectiveRAG:
         existing = [c.name for c in client.get_collections().collections]
         if collection_name in existing:
             _delete_points_with_retry(client, collection_name, kb_name)
+        with self._retriever_lock:
+            self._retrievers.pop(kb_name, None)
 
     # ---------- 单步能力 ----------
 
-    def _retrieve(self, question: str) -> List[Document]:
-        if self.retriever is None:
-            return []
-        return self.retriever.invoke(question)
+    def _get_retriever(self, kb_name: str) -> Optional["QdrantRetriever"]:
+        """按知识库构建检索器；若 Qdrant 已有数据则懒加载，重启后也能用。
 
-    def _generate(self, question: str, documents: List[Document]) -> str:
+        构建失败按 RETRIEVER_MISS_COOLDOWN 冷却，避免 Qdrant 不可用或集合
+        尚未创建时每次查询都新建连接。
+        """
+        with self._retriever_lock:
+            if kb_name in self._retrievers:
+                return self._retrievers[kb_name]
+            if (
+                time.monotonic() - self._retriever_misses.get(kb_name, 0.0)
+                < RETRIEVER_MISS_COOLDOWN
+            ):
+                return None
+        if not (self.qdrant_url and (self.embedding_api_key or self.openai_api_key)):
+            return None
+        try:
+            client = QdrantClient(
+                url=self.qdrant_url, api_key=self.qdrant_api_key, timeout=60
+            )
+            existing = [c.name for c in client.get_collections().collections]
+            if DEFAULT_COLLECTION not in existing:
+                with self._retriever_lock:
+                    self._retriever_misses[kb_name] = time.monotonic()
+                return None
+            retriever = QdrantRetriever(
+                client,
+                DEFAULT_COLLECTION,
+                self._embeddings(),
+                kb_name=kb_name,
+                reranker=self._rerank,
+            )
+        except Exception:  # noqa: BLE001
+            with self._retriever_lock:
+                self._retriever_misses[kb_name] = time.monotonic()
+            return None
+        with self._retriever_lock:
+            self._retriever_misses.pop(kb_name, None)
+            return self._retrievers.setdefault(kb_name, retriever)
+
+    def prepare_retriever(self, kb_name: str) -> bool:
+        """确保能检索指定知识库；返回是否可用。"""
+        retriever = self._get_retriever(kb_name)
+        if retriever is not None:
+            with self._retriever_lock:
+                self.retriever = retriever
+            return True
+        with self._retriever_lock:
+            return self.retriever is not None
+
+    def _retrieve(self, question: str, kb_name: Optional[str] = None) -> List[Document]:
+        if kb_name is not None:
+            retriever = self._get_retriever(kb_name)
+        else:
+            retriever = self.retriever
+        if retriever is None:
+            return []
+        return retriever.invoke(question)
+
+    def _generate(
+        self,
+        question: str,
+        documents: List[Document],
+        dialogue_history: str = "",
+        memories: str = "",
+    ) -> str:
         prompt = PromptTemplate(
             template="""You are an assistant that answers questions strictly based on the provided context.
             Rules:
             - Answer ONLY using the information in the context.
+            - Use the dialogue history only to resolve references like "it", "that", or "上面那个" in the question.
+            - Past memories are for continuity only; never invent facts from them.
+            - When you use a specific context passage to support the answer, cite it as [n] at the end of the relevant sentence.
+            - Only cite a number that exists in the context; do not invent citations.
             - Do NOT add general knowledge, speculation, examples, or content from outside the context.
             - If the context does not contain enough information to answer the question,
               reply with "根据现有资料无法回答该问题" and do not guess.
             Context: {context}
+            Dialogue History: {dialogue_history}
+            Past Memories: {memories}
             Question: {question}
             Answer:""",
-            input_variables=["context", "question"],
+            input_variables=["context", "question", "dialogue_history", "memories"],
         )
         llm = self._llm()
-        context = "\n\n".join(doc.page_content for doc in documents)
+        context = "\n\n".join(
+            f"[{i}] {doc.page_content}" for i, doc in enumerate(documents, start=1)
+        )
         rag_chain = (
-            {"context": lambda x: context, "question": lambda x: question}
+            {
+                "context": lambda x: context,
+                "question": lambda x: question,
+                "dialogue_history": lambda x: dialogue_history,
+                "memories": lambda x: memories,
+            }
             | prompt
             | llm
             | StrOutputParser()
@@ -825,24 +986,43 @@ class CorrectiveRAG:
 
     # ---------- 流式生成与证据解析（供 FastAPI 界面复用） ----------
 
-    def _generate_stream(self, question: str, documents: List[Document]) -> Iterator[str]:
+    def _generate_stream(
+        self,
+        question: str,
+        documents: List[Document],
+        dialogue_history: str = "",
+        memories: str = "",
+    ) -> Iterator[str]:
         """逐 token 流式生成最终回答（与 _generate 使用相同的提示词）。"""
         prompt = PromptTemplate(
             template="""You are an assistant that answers questions strictly based on the provided context.
             Rules:
             - Answer ONLY using the information in the context.
+            - Use the dialogue history only to resolve references like "it", "that", or "上面那个" in the question.
+            - Past memories are for continuity only; never invent facts from them.
+            - When you use a specific context passage to support the answer, cite it as [n] at the end of the relevant sentence.
+            - Only cite a number that exists in the context; do not invent citations.
             - Do NOT add general knowledge, speculation, examples, or content from outside the context.
             - If the context does not contain enough information to answer the question,
               reply with "根据现有资料无法回答该问题" and do not guess.
             Context: {context}
+            Dialogue History: {dialogue_history}
+            Past Memories: {memories}
             Question: {question}
             Answer:""",
-            input_variables=["context", "question"],
+            input_variables=["context", "question", "dialogue_history", "memories"],
         )
         llm = self._llm()
-        context = "\n\n".join(doc.page_content for doc in documents)
+        context = "\n\n".join(
+            f"[{i}] {doc.page_content}" for i, doc in enumerate(documents, start=1)
+        )
         rag_chain = (
-            {"context": lambda x: context, "question": lambda x: question}
+            {
+                "context": lambda x: context,
+                "question": lambda x: question,
+                "dialogue_history": lambda x: dialogue_history,
+                "memories": lambda x: memories,
+            }
             | prompt
             | llm
             | StrOutputParser()
@@ -851,7 +1031,7 @@ class CorrectiveRAG:
             yield chunk
 
     def run_evidence(
-        self, question: str, progress_callback=None
+        self, question: str, kb_name: Optional[str] = None, progress_callback=None
     ) -> tuple[List[Document], Dict[str, Dict[str, Any]]]:
         """执行纠错检索链（检索 → 评分 → 必要时改写查询 + 网络搜索），但不生成回答。
 
@@ -859,7 +1039,7 @@ class CorrectiveRAG:
         以便前端展示检索到的片段与重排分数。
         """
         steps: Dict[str, Dict[str, Any]] = {}
-        documents = self._retrieve(question)
+        documents = self._retrieve(question, kb_name)
         if progress_callback is not None:
             progress_callback("retrieve", 0)
         steps["retrieve"] = {"documents": documents, "question": question}
@@ -903,3 +1083,38 @@ class CorrectiveRAG:
                 "question": question,
             }
         return final_documents, steps
+
+    def prepare_context(self, documents: List[Document]) -> List[Document]:
+        """在 token 预算内压缩上下文：按重排分数择优保留，超预算的单段截断。
+
+        返回的文档顺序即生成时编号 [n] 的顺序，来源列表会与之保持一致，保证可溯源。
+        压缩只做"择优 + 截断原文"，不臆造内容，维持严格基于上下文的回答。
+        """
+        if not documents:
+            return documents
+        max_tokens = self.max_context_tokens
+        # 稳定排序：分数高优先，同分或无数保持原顺序
+        ranked = sorted(
+            enumerate(documents),
+            key=lambda t: (-float(t[1].metadata.get("rerank_score", 0) or 0), t[0]),
+        )
+        selected: List[Document] = []
+        total = 0
+        for _, doc in ranked:
+            n = _count_tokens(doc.page_content)
+            # 首段无条件入选：单段独占超预算的情况由下方截断兜底
+            if selected and total + n > max_tokens:
+                break
+            selected.append(doc)
+            total += n
+        # 择优完成后总量必在预算内，除非首段单独超预算——只在这种情况截断，
+        # 不再做"单段配额"二次截断（那会在预算够用时丢掉最相关的内容）
+        if total > max_tokens:
+            selected = [
+                Document(
+                    page_content=_truncate_to_tokens(doc.page_content, max_tokens),
+                    metadata=dict(doc.metadata or {}),
+                )
+                for doc in selected
+            ]
+        return selected

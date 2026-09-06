@@ -1,8 +1,9 @@
 FROM node:20-alpine AS build
 
 WORKDIR /app
-COPY package.json ./
-RUN npm install --no-audit --no-fund
+# 连同 lock 文件一起拷贝并用 npm ci，保证构建可复现
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
 COPY . .
 RUN npm run build
 

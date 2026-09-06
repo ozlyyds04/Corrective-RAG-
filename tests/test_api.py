@@ -59,13 +59,15 @@ def test_default_kb_cannot_be_deleted():
     assert res.status_code == 400
 
 
-def test_query_without_retriever_returns_400():
+def test_query_without_retriever_returns_400(monkeypatch):
+    monkeypatch.setenv("QDRANT_URL", "")
     with make_client() as client:
         res = client.post("/api/query", json={"question": "你好", "kb_name": "默认"})
     assert res.status_code == 400
 
 
-def test_query_stream_without_retriever_reports_error():
+def test_query_stream_without_retriever_reports_error(monkeypatch):
+    monkeypatch.setenv("QDRANT_URL", "")
     with make_client() as client:
         res = client.post("/api/query/stream", json={"question": "你好", "kb_name": "默认"})
     assert res.status_code == 200

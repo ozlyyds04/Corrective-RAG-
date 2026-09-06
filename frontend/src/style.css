@@ -87,3 +87,15 @@ input[type="text"]:focus, textarea:focus { border-color: var(--accent); }
 }
 .watch-log { font-size: 12px; color: var(--muted); margin-top: 8px; max-height: 140px; overflow-y: auto; }
 .watch-log div { padding: 2px 0; }
+
+.session-list { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; max-height: 220px; overflow-y: auto; }
+.session-item { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 10px; cursor: pointer; background: var(--bg); }
+.session-item.active { background: var(--accent-soft); border-color: var(--accent); }
+.session-item .s-title { flex: 1; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.session-item .s-time { font-size: 11px; color: var(--muted); }
+.session-item .s-del { color: var(--err); cursor: pointer; font-size: 14px; }
+.steps { margin-top: 10px; display: flex; align-items: center; flex-wrap: wrap; gap: 4px; font-size: 12px; color: var(--muted); }
+.steps .step { background: var(--accent-soft); color: var(--accent); padding: 2px 8px; border-radius: 999px; }
+.steps .arrow { color: var(--border); }
+.cite { color: var(--accent); cursor: pointer; font-weight: 600; padding: 0 1px; }
+.source-card.active { border-color: var(--accent); background: var(--accent-soft); }

@@ -1,138 +1,5 @@
 # 🔄 Corrective RAG Agent
 
-## English
-
-A corrective Retrieval-Augmented Generation (RAG) system with an async full-stack UI: FastAPI backend + Vue 3 frontend, orchestrated with Docker (Redis + Qdrant). It retrieves from local documents, grades relevance, rewrites the query when needed, falls back to web search, and generates strictly grounded answers streamed token-by-token over SSE. Evaluated end-to-end on a bundled benchmark: hybrid retrieval + LLM reranking + relevance filtering + strict generation reduced the hallucination rate to **0%** and reached **95% factual accuracy** on the 20-question subset.
-
-### Features
-
-- **Hybrid Retrieval**: dense vectors (qwen3.7-text-embedding) + keyword sparse vectors (jieba tokenization), fused with RRF
-- **LLM Reranking**: the default LLM (deepseek-v4-flash-vision-exp) scores candidates (0-10) and keeps Top-5
-- **Relevance Grading**: web search is only triggered when no local chunk is relevant
-- **Web Search Fallback**: Tavily search with per-result relevance filtering
-- **Strict Generation**: answers only from context; refuses instead of guessing when information is missing
-- **Async API**: FastAPI backend with SSE streaming, retrieval-visualization events, and JSON endpoints
-- **Streaming Answers**: token-by-token streaming (SSE) with ChatGPT-style typing effect
-- **Retrieval Visualization**: the UI shows recalled candidates, their sources, and LLM rerank scores
-- **Incremental Updates**: a file watcher enqueues new/changed documents to a Redis queue; a worker ingests them automatically and streams progress
-- **Multi Knowledge Base**: single Qdrant collection + `kb` tag filtering (free-tier friendly)
-- **Multi-Source Input**: URLs (one per line), local files/folders (recursive), multi-file upload (configurable limit, default 50)
-- **Docker Deployment**: `docker-compose` runs `api`, `web`, `redis` (and optionally local `qdrant`)
-- **Resilient**: automatic retries for network errors (max 4, exponential backoff)
-- **.env Configuration**: all API keys read from `.env`; Chinese UI
-
-### Project Structure
-
-```text
-src/corrective_rag/
-  __init__.py       # package init
-  core.py           # core logic: loaders, hybrid retrieval, reranking, LangGraph workflow
-  api.py            # FastAPI backend (REST + SSE streaming, ingestion, watch endpoints)
-  jobs.py           # Redis task queue + file-watcher worker for incremental updates
-  evaluate.py       # LLM-as-judge evaluation (baseline RAG vs corrective RAG)
-frontend/           # Vue 3 + Vite SPA (chat streaming, retrieval visualization, ingest, watcher)
-  src/App.vue       # main UI
-  src/api.js        # API client + SSE reader
-tests/              # 38 pytest cases (no API keys required)
-eval/               # benchmark corpus + 47-question evaluation set
-docs/               # architecture diagram and UI screenshot
-Dockerfile          # backend image
-frontend/Dockerfile # frontend build + nginx image
-docker-compose.yml  # api / web / redis / qdrant
-.env.example        # configuration template
-```
-
-### Architecture
-
-![Architecture Diagram](docs/corrective_rag.svg)
-
-### How to Run
-
-#### Option A — Docker Compose (recommended)
-
-1. **Clone the Repository**:
-   ```bash
-   git clone https://github.com/ozlyyds04/Corrective-RAG-.git
-   cd Corrective-RAG-
-   ```
-
-2. **Configure API Keys**:
-   ```bash
-   cp .env.example .env
-   ```
-   Fill in `.env`:
-   - `LLM_API_KEY` / `LLM_BASE_URL` / `LLM_MODEL` — LLM API (default: DeepSeek official API; any OpenAI-compatible endpoint works)
-   - `EMBEDDING_MODEL` / `EMBEDDING_API_KEY` / `EMBEDDING_BASE_URL` — embedding model (default: qwen3.7-text-embedding via DashScope compatible API)
-   - `TAVILY_API_KEY` — web search
-   - `QDRANT_URL` / `QDRANT_API_KEY` — Qdrant cluster (cloud, or `http://qdrant:6333` to use the bundled local service)
-
-3. **Start the stack**:
-   ```bash
-   docker compose up --build
-   ```
-   - Web UI: <http://localhost:8081>
-   - API: <http://localhost:8001>
-   - Local Qdrant: <http://localhost:6333>
-
-#### Option B — Local Development
-
-1. **Install backend dependencies**:
-   ```bash
-   uv sync
-   ```
-
-2. **Run the backend API** (serves `http://localhost:8001`):
-   ```bash
-   uv run uvicorn corrective_rag.api:app --reload --port 8001
-   ```
-
-3. **Run the frontend** (in another terminal):
-   ```bash
-   cd frontend
-   npm install
-   npm run dev
-   ```
-   The Vite dev server proxies `/api` to the backend; open <http://localhost:5173>.
-
-### Using the Application
-
-- **Knowledge base**: create / select / delete a knowledge base
-- **Ingest documents**: paste URLs (one per line), a local file/folder path, or upload files (with a configurable upper limit)
-- **Incremental update**: start the file watcher on a directory; new/changed documents are auto-vectorized into Qdrant and progress is streamed
-- **Ask a question**: the answer streams token-by-token, and each response shows the recalled sources with their rerank scores
-
-### Testing & Evaluation
-
-Run the test suite (no API keys required):
-
-```bash
-uv run pytest
-```
-
-Compare the corrective pipeline against a plain RAG baseline using LLM-as-judge metrics (retrieval precision@k, hit rate, faithfulness / hallucination rate, unsupported claims, factual correctness):
-
-```bash
-uv run python -m corrective_rag.evaluate --llm-api-key $LLM_API_KEY \
-    --tavily-api-key $TAVILY_API_KEY --qdrant-url $QDRANT_URL
-```
-
-The evaluation set lives in `eval/questions.json` (47 questions), the corpus in `eval/data/`, and reports are written to `eval/reports/`.
-
-### Tech Stack
-
-- **LangChain / LangGraph**: orchestration and workflow management
-- **FastAPI**: async backend, REST + SSE streaming
-- **Vue 3 + Vite**: single-page frontend
-- **Qdrant**: vector database (single collection, dense + sparse vectors, `kb` tag filtering)
-- **Redis**: incremental-update task queue + event pub/sub
-- **Docker Compose**: services orchestration (api / web / redis / qdrant)
-- **qwen3.7-text-embedding**: embedding model via DashScope compatible API
-- **deepseek-v4-flash-vision-exp** (default LLM): generation, relevance grading, query rewriting, reranking
-- **Tavily**: web search fallback
-- **jieba**: keyword tokenization for sparse retrieval
-
----
-
 ## 中文
 
 一个基于 LangGraph 构建的纠正式检索增强生成（Corrective RAG）系统，配以异步全栈界面：FastAPI 后端 + Vue 3 前端，通过 Docker 编排（Redis + Qdrant）。从本地文档检索、相关性评分、必要时改写查询并联网兜底，最后严格基于上下文生成，并通过 SSE 逐字流式输出。通过配套基准评测验证：混合检索 + LLM 重排 + 相关性过滤 + 严格生成，使 20 题子集的**幻觉率降到 0%**，**事实正确率 95%**。
@@ -148,6 +15,12 @@ The evaluation set lives in `eval/questions.json` (47 questions), the corpus in 
 - **流式输出**：SSE 逐 token 推送，ChatGPT 式打字效果
 - **检索可视化**：界面展示召回片段、来源与 LLM 重排分数
 - **增量更新**：文件监听把新增/变更文档推入 Redis 队列，后台 worker 自动向量化入库并流式推送进度
+- **三层记忆**：短期对话历史（Redis）、长期文档知识（Qdrant）、情景问答摘要（Qdrant），一并注入生成
+- **会话列表**：左侧边栏多会话切换，类似 ChatGPT 体验
+- **检索过程可视化**：步骤条展示"多路召回 → 重排 → 过滤"；触发联网兜底时明确提示
+- **答案溯源**：回答用 [n] 标注所用原文片段，点击高亮对应来源
+- **上下文压缩**：在 token 预算内先按重排分数择优保留，超长片段截断后再生成
+- **安全与并发**：可选 `API_TOKEN` 鉴权（默认关）、收紧 CORS、流式请求断连自动取消，Redis leader 锁避免多 worker 重复入库
 - **多知识库**：单集合 + `kb` 标签过滤（免费档友好）
 - **多来源输入**：URL（每行一个）、本地文件/文件夹（递归）、多文件上传（上限可配置，默认 50）
 - **Docker 部署**：`docker-compose` 编排 `api`、`web`、`redis`（可选本地 `qdrant`）
@@ -162,11 +35,12 @@ src/corrective_rag/
   core.py           # 核心逻辑：加载器、混合检索、重排、LangGraph 工作流
   api.py            # FastAPI 后端（REST + SSE 流式、入库、监听接口）
   jobs.py           # Redis 任务队列 + 文件监听 worker（增量更新）
+  memory.py         # 三层记忆：短期（Redis）+ 情景（Qdrant）检索
   evaluate.py       # LLM-as-judge 评估（基线 RAG vs 纠错 RAG）
 frontend/           # Vue 3 + Vite 单页应用（聊天流式、检索可视化、入库、监听）
   src/App.vue       # 主界面
   src/api.js        # API 客户端 + SSE 解析器
-tests/              # 38 个 pytest 用例（无需 API 密钥）
+tests/              # 52 个 pytest 用例（无需 API 密钥）
 eval/               # 评测语料 + 47 题评测集
 docs/               # 架构图与界面截图
 Dockerfile          # 后端镜像
@@ -198,6 +72,12 @@ docker-compose.yml  # api / web / redis / qdrant
    - `EMBEDDING_MODEL` / `EMBEDDING_API_KEY` / `EMBEDDING_BASE_URL` —— 向量模型（默认 qwen3.7-text-embedding，走 DashScope 兼容接口）
    - `TAVILY_API_KEY` —— 网络搜索
    - `QDRANT_URL` / `QDRANT_API_KEY` —— Qdrant 集群（云端，或 `http://qdrant:6333` 使用内置本地服务）
+   - `HOST_MOUNT_PATH` / `CONTAINER_MOUNT_PATH` —— 把宿主机目录挂入容器，让本地文件夹入库可用（Docker）
+   - `MAX_CONTEXT_TOKENS` —— 上下文压缩的 token 预算（默认 2600）
+   - `REDIS_URL` / `WATCH_DIR` / `WATCH_KB` —— 增量文件监听（容器内由 compose 注入 `REDIS_URL`）
+   - `API_TOKEN` —— 可选；设置后除 `/api/health`、`/api/config` 外都需 `Authorization: Bearer <token>`
+   - `ALLOWED_ORIGINS` —— 允许跨域的来源（逗号分隔，默认 `http://localhost:5173,http://localhost:8081`）
+   - `APP_DEBUG` —— 设为 `1` 时返回具体错误信息
 
 3. **启动服务**：
    ```bash
@@ -230,9 +110,10 @@ docker-compose.yml  # api / web / redis / qdrant
 ### 使用说明
 
 - **知识库**：新建 / 选择 / 删除知识库
-- **文档入库**：粘贴 URL（每行一个）、本地文件或文件夹路径、或上传文件（上限可配置）
-- **增量更新**：对某个目录启动文件监听，新增/变更文档会自动向量化入库，进度实时推送
-- **提问**：回答逐字流式展示，每个回答会附上召回来源及其重排分数
+- **文档入库**：粘贴 URL（每行一个）、本地文件或文件夹路径、或上传文件（上限可配置，最多 200 个）
+- **增量更新**：对某个目录启动文件监听，新增/变更文档会自动向量化入库（按来源替换旧片段，不产生重复数据），进度实时推送
+- **会话**：左侧边栏可新建 / 切换 / 删除会话，对话历史保存在 Redis（默认保留一天）
+- **提问**：回答逐字流式展示；回答中的 [n] 标注可点击，高亮对应的原文来源片段；每个回答附检索步骤与来源重排分数
 
 ### 测试与评估
 
@@ -256,6 +137,7 @@ uv run python -m corrective_rag.evaluate --llm-api-key $LLM_API_KEY \
 - **LangChain / LangGraph**：编排与工作流管理
 - **FastAPI**：异步后端，REST + SSE 流式
 - **Vue 3 + Vite**：单页前端
+- **Element Plus**：UI 组件（知识库选择、提示等）
 - **Qdrant**：向量数据库（单集合，稠密 + 稀疏向量，`kb` 标签过滤）
 - **Redis**：增量更新任务队列 + 事件发布订阅
 - **Docker Compose**：服务编排（api / web / redis / qdrant）

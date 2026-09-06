@@ -6,6 +6,13 @@ services:
     env_file: .env
     environment:
       REDIS_URL: redis://redis:6379/0
+      # 让容器出站走宿主机代理（Clash），否则访问 DashScope/Qdrant 会被重置
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,redis,qdrant}
+    volumes:
+      # 把宿主机文档目录挂进容器，配合 HOST_MOUNT_PATH / CONTAINER_MOUNT_PATH 走路径翻译
+      - ${HOST_MOUNT_PATH:-./host_data}:${CONTAINER_MOUNT_PATH:-/host/docs}:ro
     depends_on:
       - redis
 
