@@ -43,7 +43,7 @@ def _get_rag() -> CorrectiveRAG:
         _get_rag._instance = CorrectiveRAG(
             openai_api_key=os.getenv("LLM_API_KEY", ""),
             openai_base_url=os.getenv("LLM_BASE_URL", ""),
-            model=os.getenv("LLM_MODEL", "deepseek-v4-flash"),
+            model=os.getenv("LLM_MODEL", "deepseek-v4-flash-vision-exp"),
             embedding_model=os.getenv("EMBEDDING_MODEL", "qwen3.7-text-embedding"),
             embedding_api_key=os.getenv("EMBEDDING_API_KEY", ""),
             embedding_base_url=os.getenv("EMBEDDING_BASE_URL", ""),
@@ -142,7 +142,7 @@ def health() -> Dict[str, Any]:
 @app.get("/api/config")
 def config() -> Dict[str, Any]:
     return {
-        "llm_model": os.getenv("LLM_MODEL", "deepseek-v4-flash"),
+        "llm_model": os.getenv("LLM_MODEL", "deepseek-v4-flash-vision-exp"),
         "embedding_model": os.getenv("EMBEDDING_MODEL", "qwen3.7-text-embedding"),
         "qdrant_url": os.getenv("QDRANT_URL", ""),
         "has_llm_key": bool(os.getenv("LLM_API_KEY")),

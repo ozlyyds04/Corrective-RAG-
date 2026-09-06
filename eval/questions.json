@@ -6,7 +6,7 @@
   {"id": "q5", "question": "本地文件夹是怎么入库的？", "reference": "递归扫描文件夹中所有受支持格式的文件"},
   {"id": "q6", "question": "文件上传单次数量上限默认是多少？", "reference": "默认 50 个，可配置范围 1 到 500"},
   {"id": "q7", "question": "API 配置从哪里读取？", "reference": "项目根目录的 .env 文件"},
-  {"id": "q8", "question": "生成最终回答使用什么模型？", "reference": "deepseek-v4-flash（默认大语言模型）"},
+  {"id": "q8", "question": "生成最终回答使用什么模型？", "reference": "deepseek-v4-flash-vision-exp（默认大语言模型）"},
   {"id": "q9", "question": "向量化使用什么模型，输出多少维？", "reference": "qwen3.7-text-embedding，1024 维"},
   {"id": "q10", "question": "向量模型通过什么接口调用？", "reference": "阿里云 DashScope 的 OpenAI 兼容接口"},
   {"id": "q11", "question": "Qdrant Cloud 免费档最多能建几个集合？", "reference": "1 个"},
@@ -39,11 +39,11 @@
   {"id": "q38", "question": "测试套件目前有多少个用例？", "reference": "31 个"},
   {"id": "q39", "question": "评测报告输出到什么路径？", "reference": "eval/reports/eval_latest.json"},
   {"id": "q40", "question": "当前向量维度是 1536 吗？", "reference": "不是，是 1024"},
-  {"id": "q41", "question": "生成模型是 Claude 吗？", "reference": "不是，默认大语言模型是 deepseek-v4-flash"},
+  {"id": "q41", "question": "生成模型是 Claude 吗？", "reference": "不是，默认大语言模型是 deepseek-v4-flash-vision-exp"},
   {"id": "q42", "question": "世界上最大的海洋是哪个？", "reference": "太平洋", "requires_web": true},
   {"id": "q43", "question": "水的化学式是什么？", "reference": "H2O", "requires_web": true},
   {"id": "q44", "question": "珠穆朗玛峰的海拔高度是多少？", "reference": "8848.86 米", "requires_web": true},
   {"id": "q45", "question": "检索采用什么召回方式？", "reference": "多路召回：稠密向量 + 关键词稀疏向量，RRF 融合后由 LLM 重排"},
   {"id": "q46", "question": "关键词稀疏向量是怎么构建的？", "reference": "用 jieba 分词后按词频构建"},
-  {"id": "q47", "question": "检索重排用什么模型打分？", "reference": "默认大语言模型（deepseek-v4-flash），按相关性打 0 到 10 分"}
+  {"id": "q47", "question": "检索重排用什么模型打分？", "reference": "默认大语言模型（deepseek-v4-flash-vision-exp），按相关性打 0 到 10 分"}
 ]

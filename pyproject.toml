@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "corrective-rag"
 version = "0.1.0"
-description = "Corrective RAG agent: LangGraph + Qdrant dense/sparse hybrid retrieval, RSS reranking, deepseek-v4-flash generation, Tavily web search, FastAPI + Vue3 UI"
+description = "Corrective RAG agent: LangGraph + Qdrant dense/sparse hybrid retrieval, RSS reranking, deepseek-v4-flash-vision-exp generation, Tavily web search, FastAPI + Vue3 UI"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [

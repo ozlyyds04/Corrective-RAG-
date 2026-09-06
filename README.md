@@ -7,7 +7,7 @@ A corrective Retrieval-Augmented Generation (RAG) system with an async full-stac
 ### Features
 
 - **Hybrid Retrieval**: dense vectors (qwen3.7-text-embedding) + keyword sparse vectors (jieba tokenization), fused with RRF
-- **LLM Reranking**: the default LLM (deepseek-v4-flash) scores candidates (0-10) and keeps Top-5
+- **LLM Reranking**: the default LLM (deepseek-v4-flash-vision-exp) scores candidates (0-10) and keeps Top-5
 - **Relevance Grading**: web search is only triggered when no local chunk is relevant
 - **Web Search Fallback**: Tavily search with per-result relevance filtering
 - **Strict Generation**: answers only from context; refuses instead of guessing when information is missing
@@ -127,7 +127,7 @@ The evaluation set lives in `eval/questions.json` (47 questions), the corpus in 
 - **Redis**: incremental-update task queue + event pub/sub
 - **Docker Compose**: services orchestration (api / web / redis / qdrant)
 - **qwen3.7-text-embedding**: embedding model via DashScope compatible API
-- **deepseek-v4-flash** (default LLM): generation, relevance grading, query rewriting, reranking
+- **deepseek-v4-flash-vision-exp** (default LLM): generation, relevance grading, query rewriting, reranking
 - **Tavily**: web search fallback
 - **jieba**: keyword tokenization for sparse retrieval
 
@@ -140,7 +140,7 @@ The evaluation set lives in `eval/questions.json` (47 questions), the corpus in 
 ### 功能特性
 
 - **混合检索**：稠密向量（qwen3.7-text-embedding）+ 关键词稀疏向量（jieba 分词），RRF 融合
-- **LLM 重排**：默认大语言模型（deepseek-v4-flash）对候选打 0-10 分，取 Top-5
+- **LLM 重排**：默认大语言模型（deepseek-v4-flash-vision-exp）对候选打 0-10 分，取 Top-5
 - **相关性评分**：本地片段全部不相关时才触发网络搜索
 - **网络搜索兜底**：Tavily 搜索，结果逐条过滤后才进入生成
 - **严格生成**：只基于上下文回答，资料不足时拒绝猜测
@@ -260,6 +260,6 @@ uv run python -m corrective_rag.evaluate --llm-api-key $LLM_API_KEY \
 - **Redis**：增量更新任务队列 + 事件发布订阅
 - **Docker Compose**：服务编排（api / web / redis / qdrant）
 - **qwen3.7-text-embedding**：向量模型（DashScope 兼容接口）
-- **deepseek-v4-flash**（默认大语言模型）：生成、相关性评分、查询改写、重排
+- **deepseek-v4-flash-vision-exp**（默认大语言模型）：生成、相关性评分、查询改写、重排
 - **Tavily**：网络搜索兜底
 - **jieba**：关键词稀疏检索的分词

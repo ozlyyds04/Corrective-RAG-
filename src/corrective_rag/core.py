@@ -324,7 +324,7 @@ class CorrectiveRAG:
         qdrant_url: str = "",
         qdrant_api_key: str = "",
         openai_base_url: str = "",
-        model: str = "deepseek-v4-flash",
+        model: str = "deepseek-v4-flash-vision-exp",
         embedding_model: str = "qwen3.7-text-embedding",
         embedding_api_key: str = "",
         embedding_base_url: str = "",

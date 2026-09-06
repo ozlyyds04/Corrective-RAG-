@@ -32,7 +32,7 @@ from langchain_openai import ChatOpenAI  # noqa: E402
 
 from corrective_rag.core import CorrectiveRAG, load_local_path  # noqa: E402
 
-JUDGE_MODEL = os.getenv("LLM_MODEL", "deepseek-v4-flash")
+JUDGE_MODEL = os.getenv("LLM_MODEL", "deepseek-v4-flash-vision-exp")
 
 
 def _extract_json(text: str) -> dict:
@@ -51,7 +51,7 @@ def judge(
     base_url: str = "",
     max_retries: int = 3,
 ) -> dict:
-    """调用默认大语言模型（deepseek-v4-flash）做二元打分，返回解析后的 JSON。"""
+    """调用默认大语言模型（deepseek-v4-flash-vision-exp）做二元打分，返回解析后的 JSON。"""
     llm = ChatOpenAI(
         model=JUDGE_MODEL,
         api_key=openai_api_key,
@@ -210,7 +210,7 @@ def main() -> None:
     parser.add_argument("--questions", default=str(ROOT / "eval/questions.json"))
     parser.add_argument("--llm-api-key", default=os.getenv("LLM_API_KEY", ""))
     parser.add_argument("--llm-base-url", default=os.getenv("LLM_BASE_URL", ""))
-    parser.add_argument("--model", default=os.getenv("LLM_MODEL", "deepseek-v4-flash"))
+    parser.add_argument("--model", default=os.getenv("LLM_MODEL", "deepseek-v4-flash-vision-exp"))
     parser.add_argument(
         "--embedding-model", default=os.getenv("EMBEDDING_MODEL", "qwen3.7-text-embedding")
     )

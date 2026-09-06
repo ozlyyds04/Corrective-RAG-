@@ -8,7 +8,7 @@
 
 - 向量数据库：Qdrant，默认集合名为 rag-qdrant
 - 向量化模型：千问 qwen3.7-text-embedding，输出 1024 维向量，使用余弦距离
-- 生成与评分模型：deepseek-v4-flash（DeepSeek 官方 API）
+- 生成与评分模型：deepseek-v4-flash-vision-exp（DeepSeek 官方 API）
 - 网络搜索：Tavily API
 - 工作流编排：LangGraph
 - 界面：Streamlit
@@ -16,10 +16,10 @@
 ## 纠错流程
 
 1. 检索：从 Qdrant 中检索与问题最相关的文档片段
-2. 相关性评分：由默认大语言模型（deepseek-v4-flash）逐条判断检索结果是否与问题相关，采用宽松标准，只过滤明显不相关的内容
+2. 相关性评分：由默认大语言模型（deepseek-v4-flash-vision-exp）逐条判断检索结果是否与问题相关，采用宽松标准，只过滤明显不相关的内容
 3. 查询改写：当检索结果相关性不足时，改写问题以生成更利于搜索的表述
 4. 网络搜索：使用改写后的问题调用 Tavily 搜索，补充本地文档缺少的信息
-5. 生成：基于本地文档与网络结果，由默认大语言模型（deepseek-v4-flash）生成最终回答
+5. 生成：基于本地文档与网络结果，由默认大语言模型（deepseek-v4-flash-vision-exp）生成最终回答
 
 ## 文档处理
 
